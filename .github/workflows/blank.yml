@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -27,7 +28,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Generate Android app
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Generate Android project
         shell: bash
         run: |
           mkdir -p app/src/main/java/com/dynaisland
@@ -140,7 +147,7 @@ jobs:
                   window.navigationBarColor = bg
 
                   val root = LinearLayout(this).apply {
-                      orientation = 1
+                      orientation = LinearLayout.VERTICAL
                       setPadding(24, 28, 24, 24)
                       setBackgroundColor(bg)
                   }
@@ -173,8 +180,11 @@ jobs:
                           ))
                           return
                       }
-                      startService(Intent(this, IslandService::class.java)
-                          .setAction(cmd).putExtra("position", pos))
+                      startService(
+                          Intent(this, IslandService::class.java)
+                              .setAction(cmd)
+                              .putExtra("position", pos)
+                      )
                   }
 
                   root.addView(label("DynaIsland Pro", 30f))
@@ -195,7 +205,7 @@ jobs:
 
                   root.addView(label("Floating island controls", 21f))
                   root.addView(label(
-                      "Enable overlay access to show the island over apps.",
+                      "Enable Appear on top to use the island over apps.",
                       14f
                   ))
 
@@ -208,15 +218,24 @@ jobs:
                   action("2. Start Dynamic Island") {
                       command("START")
                   }
-                  action("Move island to top") { command("MOVE", "top") }
-                  action("Move island to middle") { command("MOVE", "middle") }
-                  action("Move island to bottom") { command("MOVE", "bottom") }
-                  action("Remove island") { command("STOP") }
+                  action("Move island to top") {
+                      command("MOVE", "top")
+                  }
+                  action("Move island to middle") {
+                      command("MOVE", "middle")
+                  }
+                  action("Move island to bottom") {
+                      command("MOVE", "bottom")
+                  }
+                  action("Remove island") {
+                      command("STOP")
+                  }
 
                   root.addView(label(
-                      "Drag the pill to reposition it. Tap to expand.",
+                      "Drag the pill to move it. Tap to expand.",
                       14f
                   ))
+
                   setContentView(ScrollView(this).apply {
                       setBackgroundColor(bg)
                       addView(root)
@@ -242,7 +261,9 @@ jobs:
               ): Int {
                   when (i?.action) {
                       "STOP" -> removeIsland()
-                      "MOVE" -> place(i.getStringExtra("position") ?: "top")
+                      "MOVE" -> place(
+                          i.getStringExtra("position") ?: "top"
+                      )
                       else -> showIsland()
                   }
                   return START_NOT_STICKY
@@ -252,8 +273,8 @@ jobs:
                   (n * resources.displayMetrics.density).toInt()
 
               private fun showIsland() {
-                  if (!Settings.canDrawOverlays(this)) return
-                  if (pill != null) return
+                  if (!Settings.canDrawOverlays(this) || pill != null)
+                      return
 
                   wm = getSystemService(WINDOW_SERVICE) as WindowManager
                   lp = WindowManager.LayoutParams(
@@ -292,14 +313,17 @@ jobs:
                                   val dx = (e.rawX - downX).toInt()
                                   val dy = (e.rawY - downY).toInt()
                                   if (kotlin.math.abs(dx) > dp(5) ||
-                                      kotlin.math.abs(dy) > dp(5))
+                                      kotlin.math.abs(dy) > dp(5)) {
                                       dragged = true
+                                  }
                                   lp.x = (oldX + dx).coerceIn(
-                                      0, resources.displayMetrics.widthPixels -
+                                      0,
+                                      resources.displayMetrics.widthPixels -
                                           lp.width
                                   )
                                   lp.y = (oldY + dy).coerceIn(
-                                      0, resources.displayMetrics.heightPixels -
+                                      0,
+                                      resources.displayMetrics.heightPixels -
                                           lp.height
                                   )
                                   wm.updateViewLayout(v, lp)
@@ -311,7 +335,7 @@ jobs:
                                       lp.width = dp(if (expanded) 290 else 220)
                                       lp.height = dp(if (expanded) 100 else 56)
                                       pill?.text = if (expanded)
-                                          "   DynaIsland Pro\n   MUSIC  •  ACTIVE"
+                                          "   DynaIsland Pro\n   MUSIC • ACTIVE"
                                           else "  ●     NOW PLAYING       ≋  "
                                       wm.updateViewLayout(v, lp)
                                   }
@@ -326,23 +350,30 @@ jobs:
               }
 
               private fun place(pos: String) {
-                  if (pill == null) {
-                      showIsland()
-                      if (pill == null) return
-                  }
+                  if (pill == null) showIsland()
+                  if (pill == null) return
+
                   lp.y = when (pos) {
-                      "middle" -> resources.displayMetrics.heightPixels / 2
-                      "bottom" -> resources.displayMetrics.heightPixels - dp(180)
+                      "middle" ->
+                          resources.displayMetrics.heightPixels / 2
+                      "bottom" ->
+                          resources.displayMetrics.heightPixels - dp(180)
                       else -> dp(35)
                   }
-                  lp.x = (resources.displayMetrics.widthPixels - lp.width) / 2
-                  try { wm.updateViewLayout(pill, lp) }
-                  catch (_: Exception) {}
+                  lp.x = (
+                      resources.displayMetrics.widthPixels - lp.width
+                  ) / 2
+
+                  try {
+                      wm.updateViewLayout(pill, lp)
+                  } catch (_: Exception) {}
               }
 
               private fun removeIsland() {
                   pill?.let {
-                      try { wm.removeView(it) } catch (_: Exception) {}
+                      try {
+                          wm.removeView(it)
+                      } catch (_: Exception) {}
                   }
                   pill = null
                   stopSelf()
