@@ -12,37 +12,35 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
-      - name: Set up Java
+      - name: Install Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Accept SDK licenses
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "Android SDK command-line tools not found"
+            exit 1
+          fi
+          echo "sdkmanager=$SDKMANAGER" >> "$GITHUB_ENV"
+          yes | "$SDKMANAGER" --licenses || true
 
-      
-- name: Set up Android SDK
-  uses: android-actions/setup-android@v3
-
-- name: Accept Android SDK licenses
-  shell: bash
-  run: |
-    mkdir -p "$ANDROID_HOME/licenses"
-    yes | sdkmanager --licenses >/dev/null 2>&1 || true
-    sdkmanager --licenses
-    
-    
-
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses || true
-
-      - name: Install Android packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: Install Android SDK packages
+        run: |
+          yes | "$sdkmanager" --licenses || true
+          "$sdkmanager" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Generate Android project
         shell: bash
@@ -81,9 +79,11 @@ jobs:
               id("com.android.application")
               id("org.jetbrains.kotlin.android")
           }
+
           android {
               namespace = "com.dynaisland"
               compileSdk = 35
+
               defaultConfig {
                   applicationId = "com.dynaisland"
                   minSdk = 26
@@ -141,11 +141,11 @@ jobs:
           import android.view.*
           import android.widget.*
 
-          fun glass(c: Int, r: Float, s: Int = 0) =
+          private fun glass(color: Int, radius: Float, stroke: Int = 0) =
               GradientDrawable().apply {
-                  setColor(c)
-                  cornerRadius = r
-                  if (s != 0) setStroke(2, s)
+                  setColor(color)
+                  cornerRadius = radius
+                  if (stroke != 0) setStroke(2, stroke)
               }
 
           class MainActivity : Activity() {
@@ -158,31 +158,32 @@ jobs:
 
                   val root = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      setPadding(24, 28, 24, 24)
+                      setPadding(24, 24, 24, 24)
                       setBackgroundColor(bg)
                   }
 
-                  fun label(s: String, size: Float) =
-                      TextView(this).apply {
-                          text = s
+                  fun label(value: String, size: Float) {
+                      root.addView(TextView(this).apply {
+                          text = value
                           textSize = size
                           setTextColor(Color.WHITE)
                           setPadding(4, 12, 4, 12)
-                      }
+                      })
+                  }
 
-                  fun action(s: String, fn: () -> Unit) {
+                  fun button(value: String, action: () -> Unit) {
                       root.addView(Button(this).apply {
-                          text = s
+                          text = value
                           setTextColor(Color.WHITE)
                           background = glass(
                               0xFF17263D.toInt(), 28f,
                               0xFF579BFF.toInt()
                           )
-                          setOnClickListener { fn() }
+                          setOnClickListener { action() }
                       })
                   }
 
-                  fun command(cmd: String, pos: String = "top") {
+                  fun send(action: String, position: String = "top") {
                       if (!Settings.canDrawOverlays(this)) {
                           startActivity(Intent(
                               Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -190,64 +191,36 @@ jobs:
                           ))
                           return
                       }
+
                       startService(
                           Intent(this, IslandService::class.java)
-                              .setAction(cmd)
-                              .putExtra("position", pos)
+                              .setAction(action)
+                              .putExtra("position", position)
                       )
                   }
 
-                  root.addView(label("DynaIsland Pro", 30f))
-                  root.addView(label(
-                      "LIQUID GLASS  •  BLUE EDITION", 13f
-                  ))
+                  label("DynaIsland Pro", 30f)
+                  label("LIQUID GLASS  •  BLUE EDITION", 14f)
 
-                  root.addView(TextView(this).apply {
-                      text = "   ●     NOW PLAYING       ≋   "
-                      textSize = 17f
-                      gravity = Gravity.CENTER
-                      setTextColor(Color.WHITE)
-                      setPadding(12, 28, 12, 28)
-                      background = glass(
-                          Color.BLACK, 80f, 0xFF438EFF.toInt()
-                      )
-                  })
+                  label("Your Dynamic Island", 21f)
+                  label("A floating pill for your Android screen.", 15f)
 
-                  root.addView(label("Floating island controls", 21f))
-                  root.addView(label(
-                      "Enable Appear on top to use the island over apps.",
-                      14f
-                  ))
-
-                  action("1. Allow Appear on top") {
+                  button("Allow Appear on top") {
                       startActivity(Intent(
                           Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                           android.net.Uri.parse("package:$packageName")
                       ))
                   }
-                  action("2. Start Dynamic Island") {
-                      command("START")
-                  }
-                  action("Move island to top") {
-                      command("MOVE", "top")
-                  }
-                  action("Move island to middle") {
-                      command("MOVE", "middle")
-                  }
-                  action("Move island to bottom") {
-                      command("MOVE", "bottom")
-                  }
-                  action("Remove island") {
-                      command("STOP")
-                  }
 
-                  root.addView(label(
-                      "Drag the pill to move it. Tap to expand.",
-                      14f
-                  ))
+                  button("Start Dynamic Island") { send("START") }
+                  button("Position: Top") { send("MOVE", "top") }
+                  button("Position: Middle") { send("MOVE", "middle") }
+                  button("Position: Bottom") { send("MOVE", "bottom") }
+                  button("Remove Dynamic Island") { send("STOP") }
+
+                  label("Drag the pill to reposition it. Tap to expand.", 14f)
 
                   setContentView(ScrollView(this).apply {
-                      setBackgroundColor(bg)
                       addView(root)
                   })
               }
@@ -258,35 +231,41 @@ jobs:
               private var pill: TextView? = null
               private lateinit var lp: WindowManager.LayoutParams
               private var expanded = false
-              private var downX = 0f
-              private var downY = 0f
-              private var oldX = 0
-              private var oldY = 0
+              private var startX = 0f
+              private var startY = 0f
+              private var originX = 0
+              private var originY = 0
               private var dragged = false
 
-              override fun onBind(i: Intent?): IBinder? = null
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              private fun dp(value: Int): Int =
+                  (value * resources.displayMetrics.density).toInt()
 
               override fun onStartCommand(
-                  i: Intent?, flags: Int, id: Int
+                  intent: Intent?, flags: Int, startId: Int
               ): Int {
-                  when (i?.action) {
-                      "STOP" -> removeIsland()
-                      "MOVE" -> place(
-                          i.getStringExtra("position") ?: "top"
-                      )
+                  when (intent?.action) {
+                      "STOP" -> {
+                          removeIsland()
+                          return START_NOT_STICKY
+                      }
+                      "MOVE" -> {
+                          if (pill == null) showIsland()
+                          if (pill != null) {
+                              position(intent.getStringExtra("position") ?: "top")
+                          }
+                      }
                       else -> showIsland()
                   }
                   return START_NOT_STICKY
               }
 
-              private fun dp(n: Int) =
-                  (n * resources.displayMetrics.density).toInt()
-
               private fun showIsland() {
-                  if (!Settings.canDrawOverlays(this) || pill != null)
-                      return
+                  if (!Settings.canDrawOverlays(this) || pill != null) return
 
                   wm = getSystemService(WINDOW_SERVICE) as WindowManager
+
                   lp = WindowManager.LayoutParams(
                       dp(220), dp(56),
                       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -298,55 +277,58 @@ jobs:
                       y = dp(35)
                   }
 
-                  pill = TextView(this).apply {
-                      text = "  ●     NOW PLAYING       ≋  "
+                  val view = TextView(this).apply {
+                      text = "●    NOW PLAYING    ≋"
                       textSize = 13f
                       gravity = Gravity.CENTER
                       setTextColor(Color.WHITE)
                       background = glass(
                           Color.BLACK, 100f, 0xFF438EFF.toInt()
                       )
-                      setPadding(dp(8), dp(8), dp(8), dp(8))
                       elevation = dp(8).toFloat()
 
-                      setOnTouchListener { v, e ->
-                          when (e.action) {
+                      setOnTouchListener { v, event ->
+                          when (event.action) {
                               MotionEvent.ACTION_DOWN -> {
-                                  downX = e.rawX
-                                  downY = e.rawY
-                                  oldX = lp.x
-                                  oldY = lp.y
+                                  startX = event.rawX
+                                  startY = event.rawY
+                                  originX = lp.x
+                                  originY = lp.y
                                   dragged = false
                                   true
                               }
                               MotionEvent.ACTION_MOVE -> {
-                                  val dx = (e.rawX - downX).toInt()
-                                  val dy = (e.rawY - downY).toInt()
+                                  val dx = (event.rawX - startX).toInt()
+                                  val dy = (event.rawY - startY).toInt()
+
                                   if (kotlin.math.abs(dx) > dp(5) ||
                                       kotlin.math.abs(dy) > dp(5)) {
                                       dragged = true
                                   }
-                                  lp.x = (oldX + dx).coerceIn(
+
+                                  lp.x = (originX + dx).coerceIn(
                                       0,
-                                      resources.displayMetrics.widthPixels -
-                                          lp.width
+                                      (resources.displayMetrics.widthPixels -
+                                          lp.width).coerceAtLeast(0)
                                   )
-                                  lp.y = (oldY + dy).coerceIn(
+                                  lp.y = (originY + dy).coerceIn(
                                       0,
-                                      resources.displayMetrics.heightPixels -
-                                          lp.height
+                                      (resources.displayMetrics.heightPixels -
+                                          lp.height).coerceAtLeast(0)
                                   )
+
                                   wm.updateViewLayout(v, lp)
                                   true
                               }
                               MotionEvent.ACTION_UP -> {
                                   if (!dragged) {
                                       expanded = !expanded
-                                      lp.width = dp(if (expanded) 290 else 220)
+                                      lp.width = dp(if (expanded) 270 else 220)
                                       lp.height = dp(if (expanded) 100 else 56)
-                                      pill?.text = if (expanded)
-                                          "   DynaIsland Pro\n   MUSIC • ACTIVE"
-                                          else "  ●     NOW PLAYING       ≋  "
+                                      text = if (expanded)
+                                          "DynaIsland Pro\nMUSIC • ACTIVE"
+                                      else
+                                          "●    NOW PLAYING    ≋"
                                       wm.updateViewLayout(v, lp)
                                   }
                                   true
@@ -356,47 +338,56 @@ jobs:
                       }
                   }
 
-                  wm.addView(pill, lp)
+                  pill = view
+                  try {
+                      wm.addView(view, lp)
+                  } catch (e: Exception) {
+                      pill = null
+                      throw e
+                  }
               }
 
-              private fun place(pos: String) {
-                  if (pill == null) showIsland()
-                  if (pill == null) return
+              private fun position(where: String) {
+                  val view = pill ?: return
+                  val height = resources.displayMetrics.heightPixels
 
-                  lp.y = when (pos) {
-                      "middle" ->
-                          resources.displayMetrics.heightPixels / 2
-                      "bottom" ->
-                          resources.displayMetrics.heightPixels - dp(180)
+                  lp.y = when (where) {
+                      "middle" -> (height - lp.height) / 2
+                      "bottom" -> height - lp.height - dp(100)
                       else -> dp(35)
-                  }
-                  lp.x = (
-                      resources.displayMetrics.widthPixels - lp.width
-                  ) / 2
+                  }.coerceAtLeast(0)
 
-                  try {
-                      wm.updateViewLayout(pill, lp)
-                  } catch (_: Exception) {}
+                  lp.x = (resources.displayMetrics.widthPixels -
+                      lp.width) / 2
+
+                  wm.updateViewLayout(view, lp)
               }
 
               private fun removeIsland() {
-                  pill?.let {
+                  val view = pill
+                  pill = null
+                  if (view != null) {
                       try {
-                          wm.removeView(it)
+                          wm.removeView(view)
                       } catch (_: Exception) {}
                   }
-                  pill = null
                   stopSelf()
               }
 
               override fun onDestroy() {
-                  removeIsland()
+                  val view = pill
+                  pill = null
+                  if (view != null) {
+                      try {
+                          wm.removeView(view)
+                      } catch (_: Exception) {}
+                  }
                   super.onDestroy()
               }
           }
           EOF
 
-      - name: Build APK
+      - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
       - name: Upload APK
