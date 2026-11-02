@@ -4,8 +4,7 @@ name: Build DynaIsland Pro
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
@@ -13,29 +12,351 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build Android APK
+      - name: Generate Android app
+        shell: bash
         run: |
-          echo "Checking Android project..."
-          if [ ! -f gradlew ]; then
-            echo "Android source files are still needed."
-            exit 1
-          fi
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          mkdir -p app/src/main/java/com/dynaisland
+          mkdir -p app/src/main/res/values
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "DynaIsland"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+          }
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.dynaisland"
+              compileSdk = 35
+              defaultConfig {
+                  applicationId = "com.dynaisland"
+                  minSdk = 26
+                  targetSdk = 28
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="DynaIsland Pro"
+                  android:allowBackup="false">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".IslandService"
+                      android:exported="false"/>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#78B7FF</item>
+                  <item name="android:statusBarColor">#080B14</item>
+                  <item name="android:navigationBarColor">#080B14</item>
+                  <item name="android:windowLightStatusBar">false</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/java/com/dynaisland/MainActivity.kt <<'EOF'
+          package com.dynaisland
+
+          import android.app.*
+          import android.os.*
+          import android.content.*
+          import android.graphics.Color
+          import android.graphics.PixelFormat
+          import android.graphics.drawable.GradientDrawable
+          import android.provider.Settings
+          import android.view.*
+          import android.widget.*
+
+          fun glass(c: Int, r: Float, s: Int = 0) =
+              GradientDrawable().apply {
+                  setColor(c)
+                  cornerRadius = r
+                  if (s != 0) setStroke(2, s)
+              }
+
+          class MainActivity : Activity() {
+              private val bg = Color.rgb(8, 11, 22)
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.statusBarColor = bg
+                  window.navigationBarColor = bg
+
+                  val root = LinearLayout(this).apply {
+                      orientation = 1
+                      setPadding(24, 28, 24, 24)
+                      setBackgroundColor(bg)
+                  }
+
+                  fun label(s: String, size: Float) =
+                      TextView(this).apply {
+                          text = s
+                          textSize = size
+                          setTextColor(Color.WHITE)
+                          setPadding(4, 12, 4, 12)
+                      }
+
+                  fun action(s: String, fn: () -> Unit) {
+                      root.addView(Button(this).apply {
+                          text = s
+                          setTextColor(Color.WHITE)
+                          background = glass(
+                              0xFF17263D.toInt(), 28f,
+                              0xFF579BFF.toInt()
+                          )
+                          setOnClickListener { fn() }
+                      })
+                  }
+
+                  fun command(cmd: String, pos: String = "top") {
+                      if (!Settings.canDrawOverlays(this)) {
+                          startActivity(Intent(
+                              Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                              android.net.Uri.parse("package:$packageName")
+                          ))
+                          return
+                      }
+                      startService(Intent(this, IslandService::class.java)
+                          .setAction(cmd).putExtra("position", pos))
+                  }
+
+                  root.addView(label("DynaIsland Pro", 30f))
+                  root.addView(label(
+                      "LIQUID GLASS  •  BLUE EDITION", 13f
+                  ))
+
+                  root.addView(TextView(this).apply {
+                      text = "   ●     NOW PLAYING       ≋   "
+                      textSize = 17f
+                      gravity = Gravity.CENTER
+                      setTextColor(Color.WHITE)
+                      setPadding(12, 28, 12, 28)
+                      background = glass(
+                          Color.BLACK, 80f, 0xFF438EFF.toInt()
+                      )
+                  })
+
+                  root.addView(label("Floating island controls", 21f))
+                  root.addView(label(
+                      "Enable overlay access to show the island over apps.",
+                      14f
+                  ))
+
+                  action("1. Allow Appear on top") {
+                      startActivity(Intent(
+                          Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                          android.net.Uri.parse("package:$packageName")
+                      ))
+                  }
+                  action("2. Start Dynamic Island") {
+                      command("START")
+                  }
+                  action("Move island to top") { command("MOVE", "top") }
+                  action("Move island to middle") { command("MOVE", "middle") }
+                  action("Move island to bottom") { command("MOVE", "bottom") }
+                  action("Remove island") { command("STOP") }
+
+                  root.addView(label(
+                      "Drag the pill to reposition it. Tap to expand.",
+                      14f
+                  ))
+                  setContentView(ScrollView(this).apply {
+                      setBackgroundColor(bg)
+                      addView(root)
+                  })
+              }
+          }
+
+          class IslandService : Service() {
+              private lateinit var wm: WindowManager
+              private var pill: TextView? = null
+              private lateinit var lp: WindowManager.LayoutParams
+              private var expanded = false
+              private var downX = 0f
+              private var downY = 0f
+              private var oldX = 0
+              private var oldY = 0
+              private var dragged = false
+
+              override fun onBind(i: Intent?): IBinder? = null
+
+              override fun onStartCommand(
+                  i: Intent?, flags: Int, id: Int
+              ): Int {
+                  when (i?.action) {
+                      "STOP" -> removeIsland()
+                      "MOVE" -> place(i.getStringExtra("position") ?: "top")
+                      else -> showIsland()
+                  }
+                  return START_NOT_STICKY
+              }
+
+              private fun dp(n: Int) =
+                  (n * resources.displayMetrics.density).toInt()
+
+              private fun showIsland() {
+                  if (!Settings.canDrawOverlays(this)) return
+                  if (pill != null) return
+
+                  wm = getSystemService(WINDOW_SERVICE) as WindowManager
+                  lp = WindowManager.LayoutParams(
+                      dp(220), dp(56),
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = (resources.displayMetrics.widthPixels - dp(220)) / 2
+                      y = dp(35)
+                  }
+
+                  pill = TextView(this).apply {
+                      text = "  ●     NOW PLAYING       ≋  "
+                      textSize = 13f
+                      gravity = Gravity.CENTER
+                      setTextColor(Color.WHITE)
+                      background = glass(
+                          Color.BLACK, 100f, 0xFF438EFF.toInt()
+                      )
+                      setPadding(dp(8), dp(8), dp(8), dp(8))
+                      elevation = dp(8).toFloat()
+
+                      setOnTouchListener { v, e ->
+                          when (e.action) {
+                              MotionEvent.ACTION_DOWN -> {
+                                  downX = e.rawX
+                                  downY = e.rawY
+                                  oldX = lp.x
+                                  oldY = lp.y
+                                  dragged = false
+                                  true
+                              }
+                              MotionEvent.ACTION_MOVE -> {
+                                  val dx = (e.rawX - downX).toInt()
+                                  val dy = (e.rawY - downY).toInt()
+                                  if (kotlin.math.abs(dx) > dp(5) ||
+                                      kotlin.math.abs(dy) > dp(5))
+                                      dragged = true
+                                  lp.x = (oldX + dx).coerceIn(
+                                      0, resources.displayMetrics.widthPixels -
+                                          lp.width
+                                  )
+                                  lp.y = (oldY + dy).coerceIn(
+                                      0, resources.displayMetrics.heightPixels -
+                                          lp.height
+                                  )
+                                  wm.updateViewLayout(v, lp)
+                                  true
+                              }
+                              MotionEvent.ACTION_UP -> {
+                                  if (!dragged) {
+                                      expanded = !expanded
+                                      lp.width = dp(if (expanded) 290 else 220)
+                                      lp.height = dp(if (expanded) 100 else 56)
+                                      pill?.text = if (expanded)
+                                          "   DynaIsland Pro\n   MUSIC  •  ACTIVE"
+                                          else "  ●     NOW PLAYING       ≋  "
+                                      wm.updateViewLayout(v, lp)
+                                  }
+                                  true
+                              }
+                              else -> true
+                          }
+                      }
+                  }
+
+                  wm.addView(pill, lp)
+              }
+
+              private fun place(pos: String) {
+                  if (pill == null) {
+                      showIsland()
+                      if (pill == null) return
+                  }
+                  lp.y = when (pos) {
+                      "middle" -> resources.displayMetrics.heightPixels / 2
+                      "bottom" -> resources.displayMetrics.heightPixels - dp(180)
+                      else -> dp(35)
+                  }
+                  lp.x = (resources.displayMetrics.widthPixels - lp.width) / 2
+                  try { wm.updateViewLayout(pill, lp) }
+                  catch (_: Exception) {}
+              }
+
+              private fun removeIsland() {
+                  pill?.let {
+                      try { wm.removeView(it) } catch (_: Exception) {}
+                  }
+                  pill = null
+                  stopSelf()
+              }
+
+              override fun onDestroy() {
+                  removeIsland()
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
