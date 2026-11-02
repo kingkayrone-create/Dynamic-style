@@ -25,8 +25,18 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      
+- name: Set up Android SDK
+  uses: android-actions/setup-android@v3
+
+- name: Accept Android SDK licenses
+  shell: bash
+  run: |
+    mkdir -p "$ANDROID_HOME/licenses"
+    yes | sdkmanager --licenses >/dev/null 2>&1 || true
+    sdkmanager --licenses
+    
+    
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
